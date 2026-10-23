@@ -2,7 +2,7 @@ name: Update Daily Astronomy News
 
 on:
   schedule:
-    - cron: '30 4 * * *'
+    - cron: '30 5 * * 5'
   workflow_dispatch:
 
 jobs:
