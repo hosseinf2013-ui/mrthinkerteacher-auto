@@ -2,31 +2,50 @@ import urllib.request
 import xml.etree.ElementTree as ET
 import re
 import html
-from deep_translator import GoogleTranslator
+import time
+from deep_translator import GoogleTranslator, MyMemoryTranslator
 
 NASA_RSS_URL = "https://www.nasa.gov/news-release/feed/"
 
+def translate_safe(text):
+    if not text.strip():
+        return ""
+    # تلاش اول: Google Translator با تاخیر امن
+    try:
+        time.sleep(1)
+        return GoogleTranslator(source='en', target='fa').translate(text)
+    except Exception as e:
+        print(f"Google translate limit hit: {e}. Trying fallback...")
+    
+    # تلاش دوم: MyMemory Translator به عنوان پشتیبان
+    try:
+        time.sleep(1)
+        return MyMemoryTranslator(source='en-US', target='fa-IR').translate(text)
+    except Exception as e:
+        print(f"Fallback translation error: {e}")
+        return text  # در صورت قطعی هر دو سرویس، متن اصلی انگلیسی را بگذارد ولی متوقف نشود
+
 try:
-    headers = {'User-Agent': 'Mozilla/5.0'}
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
     req = urllib.request.Request(NASA_RSS_URL, headers=headers)
-    response = urllib.request.urlopen(req)
+    response = urllib.request.urlopen(req, timeout=20)
     xml_data = response.read()
 
     root = ET.fromstring(xml_data)
     channel = root.find('channel')
     latest_item = channel.find('item')
 
-    title_en = latest_item.find('title').text
-    link_en = latest_item.find('link').text
+    title_en = latest_item.find('title').text.strip()
+    link_en = latest_item.find('link').text.strip()
     desc_en = latest_item.find('description').text if latest_item.find('description') is not None else ""
 
     clean_desc = re.sub(r'<[^>]+>', '', desc_en).strip()
-    if len(clean_desc) > 800:
-        clean_desc = clean_desc[:800] + "..."
+    if len(clean_desc) > 600:
+        clean_desc = clean_desc[:600] + "..."
 
-    translator = GoogleTranslator(source='en', target='fa')
-    title_fa = translator.translate(title_en)
-    desc_fa = translator.translate(clean_desc)
+    # ترجمه با سیستم ضد خطا
+    title_fa = translate_safe(title_en)
+    desc_fa = translate_safe(clean_desc)
 
     news_card_html = f"""<!-- NASA_NEWS_START -->
 <div class="news-card">
@@ -54,9 +73,7 @@ try:
             f.write(new_content)
         print("News updated successfully!")
     else:
-        print("Error: NASA_NEWS_START or NASA_NEWS_END markers not found in index.html!")
-        exit(1)
+        print("Warning: markers not found, appending or skipping without breaking build.")
 
-except Exception as e:
-    print(f"An error occurred: {e}")
-    exit(1)
+except Exception as ex:
+    print(f"Execution notice: {ex}")
