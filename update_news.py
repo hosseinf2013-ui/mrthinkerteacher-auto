@@ -10,20 +10,18 @@ NASA_RSS_URL = "https://www.nasa.gov/news-release/feed/"
 def translate_safe(text):
     if not text or not text.strip():
         return ""
-    # تلاش اول: Google Translator با تاخیر امن
     try:
         time.sleep(1)
         return GoogleTranslator(source='en', target='fa').translate(text)
     except Exception as e:
         print(f"Google translate limit hit: {e}. Trying fallback...")
     
-    # تلاش دوم: MyMemory Translator به عنوان پشتیبان
     try:
         time.sleep(1)
         return MyMemoryTranslator(source='en-US', target='fa-IR').translate(text)
     except Exception as e:
         print(f"Fallback translation error: {e}")
-        return text  # در صورت قطعی هر دو سرویس، متن اصلی انگلیسی قرار گیرد
+        return text
 
 try:
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
@@ -38,46 +36,55 @@ try:
     title_en = latest_item.find('title').text.strip() if latest_item.find('title') is not None else ""
     link_en = latest_item.find('link').text.strip() if latest_item.find('link') is not None else ""
 
-    # ۱. استخراج تصویر از تگ enclosure یا ویژگی‌های دیگر
+    # استخراج تصویر از enclosure
     image_url = ""
     enclosure = latest_item.find('enclosure')
     if enclosure is not None and 'url' in enclosure.attrib:
         image_url = enclosure.attrib['url']
-    else:
-        for child in latest_item:
-            if 'url' in child.attrib and child.attrib.get('type', '').startswith('image'):
-                image_url = child.attrib['url']
-                break
 
-    # ۲. استخراج متن مفصل‌تر
-    namespaces = {'content': 'http://purl.org/rss/1.0/modules/content/'}
-    content_encoded = latest_item.find('content:encoded', namespaces)
+    # باز کردن صفحه اصلی خبر برای گرفتن متن کامل و مفصل مقاله
+    raw_desc = ""
+    if link_en:
+        try:
+            req_page = urllib.request.Request(link_en, headers=headers)
+            page_response = urllib.request.urlopen(req_page, timeout=20)
+            page_html = page_response.read().decode('utf-8', errors='ignore')
+            
+            # استخراج پاراگراف‌های متن اصلی از صفحه وب ناسا
+            paragraphs = re.findall(r'<p[^>]*>(.*?)</p>', page_html, re.DOTALL)
+            extracted_text = []
+            for p in paragraphs:
+                clean_p = re.sub(r'<[^>]+>', '', p).strip()
+                if len(clean_p) > 40:  # رد کردن پاراگراف‌های کوتاه یا منوهای سایت
+                    extracted_text.append(clean_p)
+            
+            if extracted_text:
+                raw_desc = " \n\n ".join(extracted_text[:6]) # گرفتن تا ۶ پاراگراف کامل
+        except Exception as web_err:
+            print(f"Could not fetch full article page, falling back to RSS desc: {web_err}")
 
-    if content_encoded is not None and content_encoded.text:
-        raw_desc = content_encoded.text
-    elif latest_item.find('description') is not None:
+    # اگر نتوانست صفحه وب را بخواند، از description معمولی فید استفاده کند
+    if not raw_desc and latest_item.find('description') is not None:
         raw_desc = latest_item.find('description').text
-    else:
-        raw_desc = ""
 
-    # اگر تصویر در تگ‌های بالا نبود، از داخل تگ img متن استخراج شود
-    if not image_url:
-        img_match = re.search(r'<img[^>]+src=["\'](.*?)["\']', raw_desc)
+    # پیدا کردن تصویر از داخل صفحه اگر در enclosure نبود
+    if not image_url and 'page_html' in locals():
+        img_match = re.search(r'<img[^>]+src=["\'](https://[^"\']+?\.(?:jpg|jpeg|png))["\']', page_html, re.IGNORECASE)
         if img_match:
             image_url = img_match.group(1)
 
     clean_desc = re.sub(r'<[^>]+>', ' ', raw_desc)
     clean_desc = re.sub(r'\s+', ' ', clean_desc).strip()
 
-    # افزایش سقف متن تا ۱۵۰۰ کاراکتر
-    if len(clean_desc) > 1500:
-        clean_desc = clean_desc[:1500] + "..."
+    # افزایش سقف متن تا ۲۵۰۰ کاراکتر برای یک خبر کاملاً مفصل و مشروح
+    if len(clean_desc) > 2500:
+        clean_desc = clean_desc[:2500] + "..."
 
-    # ۳. ترجمه عنوان و متن
+    # ترجمه عنوان و متن مفصل
     title_fa = translate_safe(title_en)
     desc_fa = translate_safe(clean_desc)
 
-    # ۴. ساخت بخش تصویر همراه با لینک دانلود مستقیم
+    # ساخت بخش تصویر و لینک دانلود مستقیم
     image_html = ""
     if image_url:
         image_html = f'''
@@ -90,10 +97,9 @@ try:
             </div>
         </div>'''
     else:
-        # در صورتی که تصویری پیدا نشد، لینک خود خبر در ناسا برای بررسی گالری داده می‌شود
         image_html = f'''
         <div style="margin: 12px 0; padding: 8px; background-color: #fff9e6; border: 1px dashed #f0ad4e; border-radius: 6px; font-size: 0.85rem; color: #8a6d3b; text-align: center;">
-            📷 تصویر درون فید یافت نشد؛ می‌توانید گالری تصاویر را در <a href="{link_en}" target="_blank" rel="noopener noreferrer" style="color:#0066cc;">صفحه اصلی خبر ناسا</a> مشاهده یا دانلود کنید.
+            📷 تصویر درون خبر یافت نشد؛ می‌توانید گالری تصاویر را در <a href="{link_en}" target="_blank" rel="noopener noreferrer" style="color:#0066cc;">صفحه اصلی خبر ناسا</a> مشاهده یا دانلود کنید.
         </div>'''
 
     news_card_html = f"""<!-- NASA_NEWS_START -->
@@ -121,7 +127,7 @@ try:
         new_content = re.sub(pattern, news_card_html, content, flags=re.DOTALL)
         with open("index.html", "w", encoding="utf-8") as f:
             f.write(new_content)
-        print("News updated successfully with image and download link!")
+        print("News updated successfully with full article text and image!")
     else:
         print("Warning: markers not found in index.html.")
 
